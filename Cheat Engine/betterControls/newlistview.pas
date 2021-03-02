@@ -2,6 +2,29 @@ unit newListView;
 
 {$mode objfpc}{$H+}
 
+{
+For people wondering WHY the first subitem has a black background when
+highlighted and not the CE version released on the website:
+lazarus 2.0.6: win32wscustomlistview.inc subfunction HandleListViewCustomDraw of
+ListViewParentMsgHandler
+
+originalcode:
+if DrawInfo^.iSubItem = 0 then Exit;
+DrawResult := ALV.IntfCustomDraw(dtSubItem, Stage,
+  DrawInfo^.nmcd.dwItemSpec, DrawInfo^.iSubItem,
+  ConvState(DrawInfo^.nmcd.uItemState), nil);
+
+
+new code:
+DrawResult := ALV.IntfCustomDraw(dtSubItem, Stage,
+  DrawInfo^.nmcd.dwItemSpec, DrawInfo^.iSubItem,
+  ConvState(DrawInfo^.nmcd.uItemState), nil);
+
+if DrawInfo^.iSubItem = 0 then Exit;
+
+
+}
+
 interface
 
 uses
@@ -18,6 +41,9 @@ type
     procedure pp(var msg: TMessage); message WM_NOTIFY;
   protected
     procedure ChildHandlesCreated; override;
+    function CustomDraw(const ARect: TRect; AStage: TCustomDrawStage): Boolean;  override;
+    function CustomDrawItem(AItem: TListItem; AState: TCustomDrawState; AStage: TCustomDrawStage): Boolean; override;
+    function CustomDrawSubItem(AItem: TListItem; ASubItem: Integer; AState: TCustomDrawState; AStage: TCustomDrawStage): Boolean; override;
   public
   published
     property ViewStyle: TViewStyle read getViewStyle write setViewStyle;
@@ -30,13 +56,20 @@ uses betterControls;
 
 
 procedure TNewListView.setViewStyle(style: TViewStyle);
-var h: THandle;
+var
+  h: THandle;
+  olds: TViewstyle;
+
+  cs: Tcontrolstate;
 begin
+  olds:=viewstyle;
   inherited ViewStyle:=style;
 
   if ShouldAppsUseDarkMode() then
   begin
-    if style=vsReport then
+    cs:=ControlState;
+
+    if (olds<>style) and (style=vsReport) and (not (csReadingState in cs)) then
     begin
       h:=ListView_GetHeader(handle);
       if (h<>0) and (h<>INVALID_HANDLE_VALUE) then
@@ -53,8 +86,29 @@ begin
   result:=inherited ViewStyle;
 end;
 
+function TNewListView.CustomDraw(const ARect: TRect; AStage: TCustomDrawStage): Boolean;
+begin
+  if ShouldAppsUseDarkMode then Canvas.Brush.style:=bsClear;
+  result:=inherited customdraw(ARect, AStage);
+end;
+
+function TNewListView.CustomDrawItem(AItem: TListItem; AState: TCustomDrawState; AStage: TCustomDrawStage): Boolean;
+begin
+  if ShouldAppsUseDarkMode then Canvas.Brush.style:=bsClear;
+  result:=inherited CustomDrawItem(AItem, AState, AStage);
+end;
+
+function TNewListView.CustomDrawSubItem(AItem: TListItem; ASubItem: Integer; AState: TCustomDrawState; AStage: TCustomDrawStage): Boolean;
+begin
+  if ShouldAppsUseDarkMode then Canvas.Brush.style:=bsClear;
+  result:=inherited CustomDrawSubItem(AItem, ASubItem, AState, AStage);
+end;
+
+
 procedure TNewListView.ChildHandlesCreated;
-var theme: THandle;
+var
+  theme: THandle;
+  h: thandle;
 begin
   inherited ChildHandlesCreated;
 
@@ -79,6 +133,13 @@ begin
       Font.color:=fDefaultTextColor;
       Color:=fDefaultBackgroundColor;
 
+      h:=ListView_GetHeader(handle);
+      if (h<>0) and (h<>INVALID_HANDLE_VALUE) then
+      begin
+        AllowDarkModeForWindow(h, 1);
+        SetWindowTheme(h, 'ItemsView',nil);
+      end;
+
     end;
 
   end;
@@ -101,7 +162,7 @@ begin
         CDDS_PREPAINT: msg.Result:=CDRF_NOTIFYITEMDRAW;
         CDDS_ITEMPREPAINT:
         begin
-          SetTextColor(p2^.hdc, fDefaultTextColor);
+          SetTextColor(p2^.hdc, clwhite); //fDefaultTextColor);
           msg.result:=CDRF_DODEFAULT;
         end;
       end;

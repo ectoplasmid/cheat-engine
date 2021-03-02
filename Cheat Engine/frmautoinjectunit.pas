@@ -439,6 +439,16 @@ resourcestring
   rsEverythingOk = 'Everything ok';
   rsRenameTab = 'Rename tab';
   rsNewNameQuestion = 'What should the new name be?';
+  rsDescribeThatThisCodeWillDisableTheScript = 'code from here till the end of the code will be used to disable the cheat';
+  rsDescribeThatThisCodeWillEnableTheScript = 'code from here to ''[DISABLE]'' will be used to enable the cheat';
+  rsAADescribeAllocatedMemory = 'this is allocated memory, you have read,write'
+    +',execute access';
+  rsPlaceYourCodeHere = 'place your code here';
+  rsAAAOBTemplate_Game = 'Game';
+  rsAAAOBTemplate_Version = 'Version';
+  rsAAAOBTemplate_Date = 'Date';
+  rsAAAOBTemplate_Author = 'Author';
+  rsAAAOBTemplate_blabla = 'This script does blah blah blah';
 
 var
   AutoAssemblerTemplates: TAutoAssemblerTemplates;
@@ -641,22 +651,17 @@ procedure TfrmAutoInject.btnExecuteClick(Sender: TObject);
 var
     a,b,i: integer;
 
-    aa: TCEAllocArray;
-    exceptionlist: TCEExceptionListArray;
+    disableinfo: TDisableInfo;
 
 
     //variables for injectintomyself:
     check: boolean;
-    registeredsymbols: TStringlist;
-    ccodesymbols: TSymbolListHandler;
     errmsg: string;
 
     sl: TStringlist;
 begin
 {$ifndef standalonetrainerwithassembler}
-  registeredsymbols:=tstringlist.Create;
-  registeredsymbols.CaseSensitive:=false;
-  registeredsymbols.Duplicates:=dupIgnore;
+  disableinfo:=TDisableInfo.create;
 
   case scriptmode of
     smlua:
@@ -674,15 +679,15 @@ begin
 
         //check if both scripts are valid before allowing the edit
 
-        setlength(aa,1);
         getenableanddisablepos(assemblescreen.Lines,a,b);
         if not CustomTypeScript then
           if (a=-1) and (b=-1) then raise exception.create(rsCodeNeedsEnableAndDisable);
 
 
+
         try
-          check:=autoassemble(assemblescreen.lines,false,true,true,injectintomyself,aa,exceptionlist,registeredsymbols,memrec) and
-                 autoassemble(assemblescreen.lines,false,false,true,injectintomyself,aa,exceptionlist,registeredsymbols,memrec);
+          check:=autoassemble(assemblescreen.lines,false,true,true,injectintomyself,disableinfo,memrec) and
+                 autoassemble(assemblescreen.lines,false,false,true,injectintomyself,disableinfo,memrec);
 
           if not check then
             errmsg:=format(rsNotAllCodeIsInjectable,['']);
@@ -711,25 +716,23 @@ begin
       else
       begin
         try
-          ccodesymbols:=tsymbollisthandler.create;   //this will cause the AA to register the symbols
-          ccodesymbols.name:='AA Single Execute';
+          disableinfo.ccodesymbols.name:='AA Single Execute';
 
-          autoassemble(assemblescreen.lines,true,true,false,false,aa,exceptionlist,nil,nil,ccodesymbols);
-          if ccodesymbols.count>0 then
+          autoassemble(assemblescreen.lines,true,true,false,false,disableinfo);
+          if disableinfo.ccodesymbols.count>0 then
           begin
             sl:=tstringlist.create;
-            ccodesymbols.GetSymbolList(sl);
+            disableinfo.ccodesymbols.GetSymbolList(sl);
             if MessageDlg('The following C-Code symbols where registered:'+sl.text+#13#10+'Do you wish to keep these?',mtConfirmation, [mbyes,mbno],0)<>mryes then
-              ccodesymbols.free;
-
-            ccodesymbols.refcount:=0;
+              freeandnil(disableinfo.ccodesymbols)
+            else
+            begin
+              disableinfo.ccodesymbols.refcount:=0;
+              disableinfo.donotfreeccodesymbols:=true; //has to be manually deleted
+            end;
 
             sl.free;
-          end
-          else
-            ccodesymbols.Free;
-
-
+          end;
 
         except
           on e:exception do
@@ -748,7 +751,8 @@ begin
     end;
 
   end;
-  registeredsymbols.free;
+
+  disableinfo.free;
 {$endif}
 end;
 
@@ -1039,8 +1043,8 @@ begin
       add('label(originalcode'+inttostr(injectnr)+')');
       add('label(exit'+inttostr(injectnr)+')');
       add('');
-      add('newmem'+inttostr(injectnr)+': //this is allocated memory, you have read,write,execute access');
-      add('//place your code here');
+      add('newmem'+inttostr(injectnr)+': //'+rsAADescribeAllocatedMemory);
+      add('//'+rsPlaceYourCodeHere);
 
       add('');
       add('originalcode'+inttostr(injectnr)+':');
@@ -1146,7 +1150,7 @@ begin
   if e=-1 then //-2 is 2 or more, so bugged, and >=0 is has one
   begin
     assemblescreen.Lines.Insert(0,'[ENABLE]');
-    assemblescreen.Lines.Insert(1,'//code from here to ''[DISABLE]'' will be used to enable the cheat');
+    assemblescreen.Lines.Insert(1, '//'+rsDescribeThatThisCodeWillEnableTheScript);
     assemblescreen.Lines.Insert(2,'');
   end;
 
@@ -1155,7 +1159,7 @@ begin
     assemblescreen.Lines.Add(' ');
     assemblescreen.Lines.Add(' ');
     assemblescreen.Lines.Add('[DISABLE]');
-    assemblescreen.Lines.Add('//code from here till the end of the code will be used to disable the cheat');
+    assemblescreen.Lines.Add('//'+rsDescribeThatThisCodeWillDisableTheScript);
   end;
 {$endif}
 end;
@@ -1168,32 +1172,25 @@ end;
 
 
 procedure TfrmAutoInject.Assigntocurrentcheattable1Click(Sender: TObject);
-var a,b: integer;
-    aa:TCEAllocArray;
-    exceptionlist:TCEExceptionListArray;
-    registeredsymbols: TStringlist;
+var
+  a,b: integer;
+  di: TDisableInfo;
 begin
-  registeredsymbols:=tstringlist.Create;
-  registeredsymbols.CaseSensitive:=false;
-  registeredsymbols.Duplicates:=dupIgnore;
 
+  getenableanddisablepos(assemblescreen.Lines,a,b);
+  if (a=-1) and (b=-1) then raise exception.create(rsCodeNeedsEnableAndDisable);
 
+  di:=TDisableInfo.create;
+  if autoassemble(assemblescreen.lines,true,true,true,false,di) and
+     autoassemble(assemblescreen.lines,true,false,true,false,di) then
+  begin
+    //add a entry with type 255
+    mainform.AddAutoAssembleScript(assemblescreen.text);
+  end
+  else showmessage(rsFailedToAddToTableNotAllCodeIsInjectable);
 
-  try
-    setlength(aa,0);
-    getenableanddisablepos(assemblescreen.Lines,a,b);
-    if (a=-1) and (b=-1) then raise exception.create(rsCodeNeedsEnableAndDisable);
+  di.free;
 
-    if autoassemble(assemblescreen.lines,true,true,true,false,aa,exceptionlist,registeredsymbols) and
-       autoassemble(assemblescreen.lines,true,false,true,false,aa,exceptionlist,registeredsymbols) then
-    begin
-      //add a entry with type 255
-      mainform.AddAutoAssembleScript(assemblescreen.text);
-    end
-    else showmessage(rsFailedToAddToTableNotAllCodeIsInjectable);
-  finally
-    freeandnil(registeredsymbols);
-  end;
 end;
 
 procedure Getjumpandoverwrittenbytes(address,addressto: ptrUint; jumppart,originalcodepart: tstrings);
@@ -1273,6 +1270,10 @@ begin
     oldsymhandler:=symhandler;
     symhandler:=selfsymhandler;
     processhandler.processhandle:=processhandle;
+  end
+  else
+  begin
+    processhandle:=processhandler.processhandle;
   end;
 
   try
@@ -1355,6 +1356,7 @@ begin
       codesize:=a-b;
     end;
 
+
     getmem(originalcodebuffer,codesize);
     if ReadProcessMemory(processhandle,pointer(b), originalcodebuffer, codesize, br) then
     begin
@@ -1369,6 +1371,7 @@ begin
 
     freememandnil(originalcodebuffer);
     originalcodebuffer:=nil;
+
 
 
 
@@ -1528,6 +1531,13 @@ begin
 
     if disablepos<>-1 then
     begin
+      with disablescript do
+      begin
+        add('dealloc(originalcall'+nameextension+')');
+        if processhandler.is64bit then
+          add('dealloc(jumptrampoline)');
+      end;
+
       for i:=0 to disablescript.Count-1 do
         script.Insert(disablepos+i+1,disablescript[i]);
     end;
@@ -3306,12 +3316,12 @@ begin
       script.Add(disablecode[i]);
 
     // add template comment at the beginning
-    script.Insert(0,'{ Game   : ' + copy(mainform.ProcessLabel.Caption, pos('-', mainform.ProcessLabel.Caption) + 1, length(mainform.ProcessLabel.Caption)));
-    script.Insert(1,'  Version: ');
-    script.Insert(2,'  Date   : ' + FormatDateTime('YYYY-MM-DD', Now));
-    script.Insert(3,'  Author : ' + UserName);
+    script.Insert(0, '{ '+rsAAAOBTemplate_Game+'   : ' + copy(mainform.ProcessLabel.Caption, pos('-', mainform.ProcessLabel.Caption) + 1, length(mainform.ProcessLabel.Caption)));
+    script.Insert(1, '  '+rsAAAOBTemplate_Version+': ');
+    script.Insert(2, '  '+rsAAAOBTemplate_Date+'   : ' + FormatDateTime('YYYY-MM-DD', Now));
+    script.Insert(3, '  '+rsAAAOBTemplate_Author+' : ' + UserName);
     script.Insert(4,'');
-    script.Insert(5,'  This script does blah blah blah');
+    script.Insert(5, '  '+rsAAAOBTemplate_blabla);
     script.Insert(6,'}');
     script.Insert(7,'');
 

@@ -9,7 +9,7 @@ uses
   newEdit, newMainMenu, newForm, newListBox, newProgressBar, newMemo, newComboBox,
   newGroupBox, newSpeedButton, newTreeView, newHeaderControl, newScrollBar,
   newScrollBox, newSynEdit, newPageControl, newtabcontrol, newStatusBar,
-  newCheckListBox, newCheckGroup, newColorBox, newDirectoryEdit,
+  newCheckListBox, newCheckGroup, newColorBox, newDirectoryEdit, NewHintwindow,
   Graphics, Themes, UxTheme, bettercontrolColorSet;
 
 type
@@ -39,6 +39,8 @@ type
   TCheckGroup=class(TNewCheckGroup);  //not fully yet (too limited)
   TColorBox=class(TNewColorBox);
   TDirectoryEdit=class(TNewDirectoryEdit);
+  THintWindow=class(TNewHintwindow);
+  THintWindowClass =class of TNewHintwindow;
 
 var
   globalCustomDraw: boolean;
@@ -52,6 +54,7 @@ var
   clHighlight: TColor=graphics.clHighlight;
   clBtnFace: TColor=graphics.clBtnFace;
   clBtnText: TColor=graphics.clBtnText;
+  clBtnBorder: TColor=graphics.clBtnText;
 
   darkmodestring: string=''; //contains ' dark' if darkmode is used (used for settings)
 
@@ -262,6 +265,8 @@ initialization
           ColorSet.InactiveCheckboxFillColor:=$999999;
           clBtnFace:=inccolor(ColorSet.TextBackground,8);
           clBtnText:=ColorSet.FontColor;
+
+          clBtnBorder:=$9b9b9b;
 
           clWindow:=colorset.TextBackground;
 

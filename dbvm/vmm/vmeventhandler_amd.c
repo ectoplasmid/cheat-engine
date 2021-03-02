@@ -35,6 +35,8 @@ int handleVMEvent_amd(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE6
 
   nosendchar[getAPICID()]=1;
 
+
+
   sendstringf("getAPICID()=%d VM_HSAVE_PA_MSR=%6\n", getAPICID(),readMSR(VM_HSAVE_PA_MSR));
 
 
@@ -58,16 +60,31 @@ int handleVMEvent_amd(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE6
 
   if ((currentcpuinfo->singleStepping.ReasonsPos) && (currentcpuinfo->vmcb->EXITCODE!=VMEXIT_NPF)) //ANYTHING except NPF is counted as a single step (in case of interrupts)
   {
-    nosendchar[getAPICID()]=0;
-    sendstringf("AMD Handler: currentcpuinfo->singleStepping.ReasonsPos=%d Calling handleSingleStep()\n",currentcpuinfo->singleStepping.ReasonsPos);
+    //nosendchar[getAPICID()]=0;
+    //sendstringf("AMD Handler: currentcpuinfo->singleStepping.ReasonsPos=%d Calling handleSingleStep()\n",currentcpuinfo->singleStepping.ReasonsPos);
+    if (currentcpuinfo->singleStepping.ReasonsPos>=2)
+    {
+      nosendchar[getAPICID()]=0;
+      sendstringf("Handling multiple single step reasons\n");
+    }
 
-    handleSingleStep(currentcpuinfo);
+
+    handleSingleStep(currentcpuinfo, vmregisters, fxsave);
     sendstring("After handleSingleStep()\n");
 
     if (currentcpuinfo->vmcb->EXITCODE==VMEXIT_EXCP1)
     {
       sendstring("It was an int1 so skip this\n"); //Todo: Check if it was a int1 or other BP before the step
 
+
+      //sendstringf("%6:\n", currentcpuinfo->vmcb->RIP);
+
+      if (currentcpuinfo->singleStepping.PreviousTFState)
+      {
+        nosendchar[getAPICID()]=0;
+        sendstring("Previous TF state was 1. calling ept_handleHardwareBreakpoint");
+        ept_handleHardwareBreakpoint(currentcpuinfo, vmregisters, fxsave);
+      }
 
       //no further handling is needed
       return 0;
@@ -107,10 +124,16 @@ int handleVMEvent_amd(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE6
       int isFault=0; //on amd it seems it ever ever set RF. isDebugFault(currentcpuinfo->vmcb->DR6, currentcpuinfo->vmcb->DR7);
 
       //int1 breakpoint
-
       nosendchar[getAPICID()]=0; //urrentcpuinfo->vmcb->CPL!=3;
-
       sendstringf("INT1 breakpoint\n");
+
+      if (ept_handleHardwareBreakpoint(currentcpuinfo, vmregisters, fxsave))
+        return 0;
+
+
+
+
+
       sendstringf("dr0=%x\n", getDR0());
       sendstringf("dr1=%x\n", getDR1());
       sendstringf("dr2=%x\n", getDR2());
@@ -173,6 +196,13 @@ int handleVMEvent_amd(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE6
 
       ShowCurrentInstructions(currentcpuinfo);
 
+      if (handleSoftwareBreakpoint(currentcpuinfo, vmregisters, fxsave))
+      {
+        sendstring("VMEXIT_EXCP3: handleSoftwareBreakpoint handled it. Returning 0\n");
+        return 0;
+      }
+
+
       //set RIP to after the instruction
       if (AMD_hasNRIPS)
       {
@@ -201,6 +231,8 @@ int handleVMEvent_amd(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE6
         unmapVMmemory(bytes, 15);
       }
       sendstringf("new RIP=%6\n", currentcpuinfo->vmcb->RIP);
+
+
 
       //and raise the interrupt
       if ((int3redirection_idtbypass==0) || (ISREALMODE(currentcpuinfo)))
@@ -515,8 +547,28 @@ int handleVMEvent_amd(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE6
       return 0;
     }
 
+    case VMEXIT_RDTSC:
+    {
+      int r;
+      r=handle_rdtsc(currentcpuinfo, vmregisters);
+      currentcpuinfo->lastTSCTouch=_rdtsc();
+      return r;
+    }
+
+    case VMEXIT_RDTSCP:
+    {
+      int r=handle_rdtsc(currentcpuinfo, vmregisters);
+      currentcpuinfo->lastTSCTouch=_rdtsc();
+
+      vmregisters->rcx=readMSR(IA32_TSC_AUX_MSR);
+      return r;
+    }
+
     case VMEXIT_MSR:
     {
+      int error=0;
+      int exceptionnr=0;
+      unsigned int msr=vmregisters->rcx & 0xffffffff;
 
       sendstring("VMEXIT_MSR\n");
       sendstringf("EXITINFO1=%d\n", currentcpuinfo->vmcb->EXITINFO1);
@@ -524,10 +576,35 @@ int handleVMEvent_amd(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE6
 
       if (currentcpuinfo->vmcb->EXITINFO1)
       {
-        sendstringf("WRITE %x\n", vmregisters->rcx);
 
-        switch (vmregisters->rcx & 0xffffffff)
+        QWORD newvalue=((vmregisters->rdx & 0xffffffff) << 32) + (currentcpuinfo->vmcb->RAX & 0xffffffff);
+
+        sendstringf("WRITE %6 to msr %x\n", newvalue, vmregisters->rcx);
+
+        switch (msr)
         {
+          case IA32_TIME_STAMP_COUNTER:
+            sendstringf("write to IA32_TIME_STAMP_COUNTER\n");
+            writeMSR(IA32_TIME_STAMP_COUNTER, newvalue);
+
+            currentcpuinfo->lowestTSC=0;
+            globalTSC=newvalue;
+            currentcpuinfo->lastTSCTouch=newvalue;
+
+            lowestTSC=0;
+            break;
+
+          case IA32_TSC_ADJUST:
+            sendstringf("write to IA32_TSC_ADJUST\n");
+            writeMSR(IA32_TSC_ADJUST, newvalue);
+            globalTSC=_rdtsc();
+            currentcpuinfo->lasttsc=_rdtsc();
+            currentcpuinfo->lastTSCTouch=globalTSC;
+            currentcpuinfo->lowestTSC=0;
+            lowestTSC=0;
+
+            break;
+
           case 0xc0000080://efer
             //store the efer the guest wants it to be
             currentcpuinfo->efer=((vmregisters->rdx & 0xffffffff) << 32) + (currentcpuinfo->vmcb->RAX & 0xffffffff);
@@ -549,6 +626,34 @@ int handleVMEvent_amd(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE6
             currentcpuinfo->guest_VM_HSAVE_PA=((vmregisters->rdx & 0xffffffff) << 32) + (currentcpuinfo->vmcb->RAX & 0xffffffff);
             break;
 
+          default:
+            nosendchar[getAPICID()]=0;
+            sendstringf("Unhandled WRMSR(%8, %6)", vmregisters->rcx & 0xffffffff, newvalue);
+            try
+            {
+              writeMSR(vmregisters->rcx, newvalue);
+            }
+            except
+            {
+              error=1;
+              exceptionnr=lastexception & 0xff;
+            }
+            tryend
+
+            if (error)
+            {
+              int er;
+              sendstringf("Exception during MSR write (interrupt %d)\n",exceptionnr);
+              sendstringf("Calling raiseGeneralProtectionFault\n");
+              er=raiseGeneralProtectionFault(0);
+              sendstringf("raiseGeneralProtectionFault returned %d", er);
+              return er;
+            }
+
+
+            break;
+
+
 
 
         }
@@ -562,6 +667,10 @@ int handleVMEvent_amd(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE6
 
         switch (vmregisters->rcx & 0xffffffff)
         {
+          case IA32_TIME_STAMP_COUNTER:
+            return handle_rdtsc(currentcpuinfo, vmregisters); //will be responsible for adjust rip as well
+
+
           case 0xc0000080://efer
             //update LMA
 
@@ -577,6 +686,32 @@ int handleVMEvent_amd(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE6
 
           case 0xc0010117:
             value=currentcpuinfo->guest_VM_HSAVE_PA;
+            break;
+
+          default:
+            nosendchar[getAPICID()]=0;
+            sendstringf("Unhandled RDMSR(%8)", msr);
+            try
+            {
+              value=readMSR(msr);
+            }
+            except
+            {
+              error=1;
+              exceptionnr=lastexception & 0xff;
+            }
+            tryend
+
+            if (error)
+            {
+              int er;
+              sendstringf("Exception during MSR read (%8) (interrupt %d)\n",msr, exceptionnr);
+              sendstringf("Calling raiseGeneralProtectionFault\n");
+              er=raiseGeneralProtectionFault(0);
+              sendstringf("raiseGeneralProtectionFault returned %d", er);
+              return er;
+            }
+
             break;
         }
 

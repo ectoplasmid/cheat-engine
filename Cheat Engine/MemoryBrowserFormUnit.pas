@@ -69,7 +69,7 @@ type
     MenuItem12: TMenuItem;
     MenuItem13: TMenuItem;
     MenuItem14: TMenuItem;
-    DBVMFindoutwhataddressesthisinstructionaccesses: TMenuItem;
+    miDBVMFindoutwhataddressesthisinstructionaccesses: TMenuItem;
     Showdebugtoolbar1: TMenuItem;
     miCopyAddressesOnly: TMenuItem;
     miHideToolbar: TMenuItem;
@@ -342,7 +342,7 @@ type
     procedure MenuItem11Click(Sender: TObject);
     procedure MenuItem12Click(Sender: TObject);
     procedure MenuItem14Click(Sender: TObject);
-    procedure DBVMFindoutwhataddressesthisinstructionaccessesClick(Sender: TObject);
+    procedure miDBVMFindoutwhataddressesthisinstructionaccessesClick(Sender: TObject);
     procedure MenuItem4Click(Sender: TObject);
     procedure miOpenInDissectDataClick(Sender: TObject);
     procedure miShowSectionAddressesClick(Sender: TObject);
@@ -1175,7 +1175,7 @@ begin
   EnableWindowsSymbols(true);
 end;
 
-procedure TMemoryBrowser.DBVMFindoutwhataddressesthisinstructionaccessesClick(Sender: TObject);
+procedure TMemoryBrowser.miDBVMFindoutwhataddressesthisinstructionaccessesClick(Sender: TObject);
 begin
   DBVMFindwhatThiscodeAccesses(disassemblerview.SelectedAddress);
 end;
@@ -3985,6 +3985,13 @@ begin
       disassemblerview.Update;
       exit;
     end;
+
+    if bo=4 then //break and trace
+    begin
+      dbvm_cloak_traceonbp_remove(PA);
+      disassemblerview.Update;
+      exit;
+    end;
   end;
 
   try
@@ -4378,8 +4385,8 @@ begin
 
   miAddToTheCodelist.visible:=not inadvancedoptions;
 
-  DBVMFindoutwhataddressesthisinstructionaccesses.visible:={$ifdef windows}isDBVMCapable and miSetSpecificBreakpoint.visible{$else}false{$endif};
-  DBVMFindoutwhataddressesthisinstructionaccesses.enabled:=DBVMFindoutwhataddressesthisinstructionaccesses.visible and DBKLoaded;
+  miDBVMFindoutwhataddressesthisinstructionaccesses.visible:={$ifdef windows}isDBVMCapable and miSetSpecificBreakpoint.visible{$else}false{$endif};
+  miDBVMFindoutwhataddressesthisinstructionaccesses.enabled:=miDBVMFindoutwhataddressesthisinstructionaccesses.visible and DBKLoaded;
 
   //
   miSetBreakpointHW.enabled:=(CurrentDebuggerInterface=nil) or (dbcHardwareBreakpoint in CurrentDebuggerInterface.DebuggerCapabilities);
@@ -4766,6 +4773,7 @@ begin
         else
           unlockaddress:=0;
 
+        frmchangedaddresses.address:=address;
 
         frmchangedaddresses.dbvmwatchid:=id;
         frmchangedaddresses.dbvmwatch_unlock:=unlockaddress;
